@@ -142,65 +142,42 @@ if(carousel){
   render();carousel.classList.add('is-ready');schedule();
 }
 
-// Short acceleration ramps keep cruise speed consistent and endpoints gentle.
+// Wait one second, then scroll slowly enough to read the page preview.
 document.querySelectorAll('.client-slide').forEach(slide=>{
  const frame=slide.querySelector('.client-preview'), image=frame.querySelector('img');
- let active=false, animation=null, travel=null, timer;
- const speed=325, ramp=.18;
+ let active=false, animation=null, timer=null;
  const interested=()=>!document.hidden&&slide.dataset.position==='0'&&((canHover.matches&&slide.matches(':hover'))||(keyboardNavigation&&slide.matches(':focus-visible')));
- const position=()=>{const transform=getComputedStyle(image).transform;return transform==='none'?0:new DOMMatrixReadOnly(transform).m42;};
- const velocity=()=>{
-  if(!animation||!travel)return 0;
-  const t=Math.max(0,Math.min(travel.duration,Number(animation.currentTime||0)/1000));
-  if(travel.braking)return travel.velocity*(1-t/travel.duration);
-  return travel.direction*travel.peak*Math.max(0,Math.min(1,t/travel.ramp,(travel.duration-t)/travel.ramp));
- };
- const freeze=()=>{const y=position();animation?.cancel();animation=null;travel=null;image.style.transform=`translateY(${y}px)`;return y;};
- const reset=()=>{active=false;clearTimeout(timer);animation?.cancel();animation=null;travel=null;image.style.transform='translateY(0)';};
- function animate(frames,duration,target,complete){
-  const motion=image.animate(frames,{duration:duration*1000,fill:'forwards'});
+ const bottom=()=>-Math.max(0,image.clientHeight-frame.clientHeight);
+ function moveTo(target){
+  const from=getComputedStyle(image).transform;
+  animation?.cancel();
+  animation=null;
+  image.style.transform=from;
+  const destination='translateY('+target+'px)';
+  if(reducedMotion.matches){image.style.transform=destination;return;}
+  const y=from==='none'?0:new DOMMatrixReadOnly(from).m42;
+  if(Math.abs(target-y)<.5){image.style.transform=destination;return;}
+  const motion=image.animate([{transform:from},{transform:destination}],{duration:Math.max(1200,Math.abs(target-y)/110*1000),easing:'cubic-bezier(.42,0,.58,1)',fill:'forwards'});
   animation=motion;
-  motion.onfinish=()=>{if(animation!==motion)return;image.style.transform=`translateY(${target}px)`;motion.cancel();animation=null;travel=null;complete?.();};
+  motion.onfinish=()=>{
+   if(animation!==motion)return;
+   image.style.transform=destination;
+   motion.cancel();
+   animation=null;
+  };
  }
- function moveTo(target,complete){
-  const from=freeze();
-  const distance=Math.abs(target-from),direction=Math.sign(target-from);
-  if(distance<.5){image.style.transform=`translateY(${target}px)`;complete?.();return;}
-  const peak=Math.min(speed,Math.sqrt(distance*speed/ramp));
-  const acceleration=peak/(speed/ramp),duration=distance/peak+acceleration;
-  const rampOffset=Math.min(.5,acceleration/duration);
-  const edge=peak*acceleration/2;
-  travel={direction,peak,ramp:acceleration,duration};
-  animate([
-   {transform:`translateY(${from}px)`,offset:0,easing:'cubic-bezier(.333333,0,.666667,.333333)'},
-   {transform:`translateY(${from+direction*edge}px)`,offset:rampOffset,easing:'linear'},
-   {transform:`translateY(${target-direction*edge}px)`,offset:1-rampOffset,easing:'cubic-bezier(.333333,.666667,.666667,1)'},
-   {transform:`translateY(${target}px)`,offset:1}
-  ],duration,target,complete);
- }
- function tour(){
-  if(!active)return;
-  const distance=Math.max(0,image.clientHeight-frame.clientHeight);
-  if(!distance)return;
-  moveTo(-distance,()=>{if(active)timer=setTimeout(()=>moveTo(0,()=>{if(active)timer=setTimeout(tour,1500);}),200);});
- }
- const start=()=>{if(active||!interested()||reducedMotion.matches)return;active=true;clearTimeout(timer);tour();};
- const stop=()=>{
-  if(!active)return;
-  active=false;clearTimeout(timer);
-  if(reducedMotion.matches){reset();return;}
-  const currentVelocity=velocity(),from=freeze();
-  const distance=Math.max(0,image.clientHeight-frame.clientHeight);
-  const target=Math.max(-distance,Math.min(0,from+currentVelocity*ramp/2));
-  const resume=()=>{timer=setTimeout(()=>moveTo(0),250);};
-  if(Math.abs(currentVelocity)<1||Math.abs(target-from)<.5){resume();return;}
-  const duration=2*Math.abs(target-from)/Math.abs(currentVelocity);
-  travel={braking:true,velocity:currentVelocity,duration};
-  animate([{transform:`translateY(${from}px)`,easing:'cubic-bezier(.333333,.666667,.666667,1)'},{transform:`translateY(${target}px)`}],duration,target,resume);
+ const queueMove=()=>{
+  clearTimeout(timer);
+  const from=getComputedStyle(image).transform;
+  animation?.cancel();animation=null;image.style.transform=from;
+  timer=setTimeout(()=>{timer=null;moveTo(active?bottom():0);},1000);
  };
+ const reset=()=>{active=false;clearTimeout(timer);timer=null;animation?.cancel();animation=null;image.style.transform='translateY(0)';};
+ const start=()=>{if(active||!interested()||reducedMotion.matches)return;active=true;queueMove();};
+ const stop=()=>{if(!active)return;active=false;queueMove();};
  const syncInterest=()=>{if(interested())start();else stop();};
- image.addEventListener('load',()=>{if(active)tour();});
- if('ResizeObserver' in window)new ResizeObserver(()=>{if(active)tour();else reset();}).observe(frame);
+ image.addEventListener('load',()=>{if(active)queueMove();});
+ if('ResizeObserver' in window)new ResizeObserver(()=>{if(active)queueMove();else if(!timer)moveTo(0);}).observe(frame);
  slide.addEventListener('pointerenter',event=>{if(event.pointerType==='mouse')syncInterest();});
  slide.addEventListener('pointerleave',syncInterest);
  slide.addEventListener('focus',syncInterest);
